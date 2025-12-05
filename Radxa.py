@@ -26,14 +26,15 @@ class ArduinoMonitor:
         self.serial_conn = None
         self.is_reading = False
         self.is_paused = False
+        self.is_recording_session = False # Para controlar la grabación de datos para CSV
         self.max_data_points = 200
         
         # Datos para cada potenciómetro
         self.pot_data = {
-            'Pot1': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'enabled': True, 'color': '#e74c3c', 'offset': 0},
-            'Pot2': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'enabled': True, 'color': '#3498db', 'offset': 0},
-            'Pot3': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'enabled': True, 'color': '#2ecc71', 'offset': 0},
-            'Pot4': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'enabled': True, 'color': '#f39c12', 'offset': 0}
+            'Pot1': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#e74c3c', 'offset': 0},
+            'Pot2': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#3498db', 'offset': 0},
+            'Pot3': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#2ecc71', 'offset': 0},
+            'Pot4': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#f39c12', 'offset': 0}
         }
         
         self.start_time = time.time()
@@ -78,6 +79,9 @@ class ArduinoMonitor:
         style.configure('Report.TButton', background='#9b59b6', foreground='white') # Morado
         style.map('Report.TButton', background=[('active', '#8e44ad')])
 
+        style.configure('Record.TButton', background='#2ecc71', foreground='white') # Verde (igual que conectar)
+        style.map('Record.TButton', background=[('active', '#27ae60')])
+
         # Estilo para el botón "SET 0"
         style.configure('Small.TButton', font=('Arial', 9, 'bold'), padding=(8, 4), foreground='black', background='#ecf0f1')
         style.map('Small.TButton', background=[('active', '#bdc3c7')])
@@ -102,6 +106,10 @@ class ArduinoMonitor:
         
         ttk.Button(control_frame, text="Limpiar", command=self.clear_data, style='Action.TButton').grid(row=0, column=5, padx=5)
         
+        # Botón para iniciar/detener la grabación de la sesión
+        self.record_btn = ttk.Button(control_frame, text="Iniciar Grabación", command=self.toggle_recording, state='disabled', style='Record.TButton')
+        self.record_btn.grid(row=0, column=6, padx=10)
+
         # Frame de reportes - DERECHA
         report_frame = ttk.LabelFrame(main_frame, text="Reportes", padding="10")
         report_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
@@ -162,6 +170,11 @@ class ArduinoMonitor:
             tare_btn = ttk.Button(top_frame, text="Poner a 0", style='Small.TButton',
                                   command=lambda p=pot_name: self.set_zero(p))
             tare_btn.pack(side=tk.LEFT, padx=5)
+
+            # Botón para reiniciar el offset
+            reset_btn = ttk.Button(top_frame, text="Reset 0", style='Small.TButton',
+                                   command=lambda p=pot_name: self.reset_offset(p))
+            reset_btn.pack(side=tk.LEFT, padx=5)
             
             # Crear figura de matplotlib individual
             fig = Figure(figsize=(5.5, 3.5), dpi=90)
@@ -208,6 +221,7 @@ class ArduinoMonitor:
             self.is_reading = True
             self.connect_btn.config(text="Desconectar", style='Disconnect.TButton')
             self.pause_btn.config(state='normal')
+            self.record_btn.config(state='normal')
             
             # Iniciar thread de lectura
             self.read_thread = threading.Thread(target=self.read_serial, daemon=True)
@@ -226,7 +240,13 @@ class ArduinoMonitor:
             self.serial_conn.close()
             self.serial_conn = None
         self.connect_btn.config(text="Conectar", style='Connect.TButton')
-        self.pause_btn.config(state='disabled')
+        self.pause_btn.config(state='disabled', text="Pausar")
+        self.is_paused = False
+
+        # Detener y deshabilitar grabación
+        self.is_recording_session = False
+        self.record_btn.config(state='disabled', text="Iniciar Grabación", style='Record.TButton')
+
     
     def toggle_pause(self):
         self.is_paused = not self.is_paused
@@ -234,6 +254,21 @@ class ArduinoMonitor:
     
     def toggle_pot(self, pot_name):
         self.pot_data[pot_name]['enabled'] = self.pot_vars[pot_name].get()
+
+    def toggle_recording(self):
+        self.is_recording_session = not self.is_recording_session
+        if self.is_recording_session:
+            # Al iniciar una nueva grabación, limpiar los datos de la sesión anterior
+            for pot_info in self.pot_data.values():
+                pot_info['all_values'].clear()
+                pot_info['all_times'].clear()
+            
+            self.record_btn.config(text="Detener Grabación", style='Disconnect.TButton')
+            messagebox.showinfo("Grabación Iniciada", "Se ha iniciado la grabación de datos para el reporte.")
+        else:
+            self.record_btn.config(text="Iniciar Grabación", style='Record.TButton')
+            messagebox.showinfo("Grabación Detenida", "Se ha detenido la grabación. Los datos capturados están listos para ser exportados.")
+
     
     def read_serial(self):
         while self.is_reading:
@@ -271,6 +306,11 @@ class ArduinoMonitor:
                         
                         pot_info['values'].append(adjusted_value)
                         pot_info['times'].append(current_time)
+                        
+                        if self.is_recording_session:
+                            pot_info['all_values'].append(adjusted_value)
+                            pot_info['all_times'].append(current_time)
+
                         # Actualizar label
                         self.pot_labels[pot_name].config(text=f"{adjusted_value}")
         except Exception as e:
@@ -312,8 +352,15 @@ class ArduinoMonitor:
         for pot_info in self.pot_data.values():
             pot_info['values'].clear()
             pot_info['times'].clear()
+            pot_info['all_values'].clear()
+            pot_info['all_times'].clear()
             pot_info['offset'] = 0 # Restablecer el offset
         self.start_time = time.time()
+
+        # Reiniciar estado de grabación si la conexión está activa
+        if self.is_reading:
+            self.is_recording_session = False
+            self.record_btn.config(text="Iniciar Grabación", style='Record.TButton')
         
         for label in self.pot_labels.values():
             label.config(text="---")
@@ -325,6 +372,12 @@ class ArduinoMonitor:
             last_adjusted_value = list(pot_info['values'])[-1]
             pot_info['offset'] += last_adjusted_value
             messagebox.showinfo("Punto Cero Establecido", f"El nuevo cero para {pot_name} se ha establecido en el valor actual.")
+
+    def reset_offset(self, pot_name):
+        pot_info = self.pot_data[pot_name]
+        pot_info['offset'] = 0
+        messagebox.showinfo("Offset Reiniciado", f"El offset para {pot_name} ha sido reiniciado a 0.")
+
     
     def export_csv(self):
         filename = filedialog.asksaveasfilename(
@@ -351,21 +404,21 @@ class ArduinoMonitor:
                 
                 writer.writerow(headers)
                 
-                # Escribir datos solo de potenciómetros habilitados
-                # Usamos el primer potenciómetro habilitado para determinar la longitud
-                max_len = max(len(p['values']) for p in self.pot_data.values() if p['enabled']) if enabled_pots else 0
+                # Usar el historial completo ('all_values') para la exportación
+                # Usamos el primer potenciómetro habilitado para obtener los tiempos
+                if not enabled_pots:
+                    messagebox.showwarning("Advertencia", "No hay potenciómetros habilitados para exportar.")
+                    return
+
+                first_pot_info = self.pot_data[enabled_pots[0]]
+                max_len = len(first_pot_info['all_values'])
+
                 for i in range(max_len):
-                    row = []
-                    
+                    # Usar el tiempo del primer potenciómetro como referencia
+                    row = [f"{first_pot_info['all_times'][i]:.2f}"]
                     for pot_name in enabled_pots:
                         pot_info = self.pot_data[pot_name]
-                        if i < len(pot_info['values']):
-                            if not row: # Añadir el tiempo solo una vez por fila
-                                row.append(f"{pot_info['times'][i]:.2f}")
-                            row.append(pot_info['values'][i])
-                        else:
-                            row.append('')
-                    
+                        row.append(pot_info['all_values'][i] if i < len(pot_info['all_values']) else '')
                     writer.writerow(row)
             
             messagebox.showinfo("Exportado", f"Datos exportados exitosamente:\n{filename}\n\nSe guardaron {len(enabled_pots)} potenciómetros seleccionados.")

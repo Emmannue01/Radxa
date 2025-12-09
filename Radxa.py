@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import serial
+import queue
 import serial.tools.list_ports
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -27,14 +28,16 @@ class ArduinoMonitor:
         self.is_reading = False
         self.is_paused = False
         self.is_recording_session = False # Para controlar la grabación de datos para CSV
+        self.is_calibrating = False # Para controlar el modo calibración
+        self.calibration_queue = queue.Queue() # Cola para mensajes de calibración
         self.max_data_points = 200
         
         # Datos para cada potenciómetro
         self.pot_data = {
-            'Pot1': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#e74c3c', 'offset': 0},
-            'Pot2': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#3498db', 'offset': 0},
-            'Pot3': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#2ecc71', 'offset': 0},
-            'Pot4': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#f39c12', 'offset': 0}
+            'Pot1': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#e74c3c', 'offset': 0, 'min_session': None, 'max_session': None},
+            'Pot2': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#3498db', 'offset': 0, 'min_session': None, 'max_session': None},
+            'Pot3': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#2ecc71', 'offset': 0, 'min_session': None, 'max_session': None},
+            'Pot4': {'values': deque(maxlen=self.max_data_points), 'times': deque(maxlen=self.max_data_points), 'all_values': [], 'all_times': [], 'enabled': True, 'color': '#f39c12', 'offset': 0, 'min_session': None, 'max_session': None}
         }
         
         self.start_time = time.time()
@@ -116,6 +119,9 @@ class ArduinoMonitor:
         
         ttk.Button(report_frame, text="Exportar CSV", command=self.export_csv, width=18, style='Report.TButton').pack(pady=5, padx=5, fill=tk.X)
         ttk.Button(report_frame, text="Generar PDF", command=self.generate_pdf_report, width=18, style='Report.TButton').pack(pady=5, padx=5, fill=tk.X)
+
+        # El frame de control del Arduino se elimina de aquí, se moverá a cada gráfica individual.
+        main_frame.columnconfigure(2, weight=0) # Ajustar columna
         
         # Frame de gráficas con checkboxes integrados (2x2)
         graph_frame = ttk.Frame(main_frame)
@@ -132,7 +138,9 @@ class ArduinoMonitor:
         self.pot_labels = {}
         self.axes = {}
         self.lines = {}
+        self.range_entries = {} # Para guardar las entradas de rango
         self.canvases = {}
+        self.min_max_texts = {} # Para mostrar min/max en la gráfica
         
         positions = [
             ('Pot1', 0, 0),
@@ -148,9 +156,9 @@ class ArduinoMonitor:
             pot_container = ttk.LabelFrame(graph_frame, text="", padding="5")
             pot_container.grid(row=row, column=col, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
             
-            # Frame superior con checkbox y valor
+            # --- Frame superior con checkbox, valor y botones de cero ---
             top_frame = ttk.Frame(pot_container)
-            top_frame.pack(fill=tk.X, pady=(0, 5))
+            top_frame.pack(fill=tk.X, pady=(0, 2))
             
             # Checkbox
             var = tk.BooleanVar(value=True)
@@ -175,6 +183,25 @@ class ArduinoMonitor:
             reset_btn = ttk.Button(top_frame, text="Reset 0", style='Small.TButton',
                                    command=lambda p=pot_name: self.reset_offset(p))
             reset_btn.pack(side=tk.LEFT, padx=5)
+
+            # --- Frame inferior con controles de rango y calibración ---
+            control_frame = ttk.Frame(pot_container)
+            control_frame.pack(fill=tk.X, pady=(2, 5))
+
+            ttk.Label(control_frame, text="Rango (mm):").pack(side=tk.LEFT, padx=(5, 2))
+            range_entry = ttk.Entry(control_frame, width=6, font=('Arial', 9))
+            range_entry.insert(0, "25.0")
+            range_entry.pack(side=tk.LEFT, padx=2)
+            self.range_entries[pot_name] = range_entry
+
+            # El índice del potenciómetro (1-4)
+            pot_index = int(pot_name.replace('Pot', ''))
+            
+            ttk.Button(control_frame, text="Establecer", style='Small.TButton',
+                       command=lambda p=pot_name, i=pot_index: self.set_transducer_range(p, i)).pack(side=tk.LEFT, padx=2)
+            
+            ttk.Button(control_frame, text="Calibrar", style='Small.TButton',
+                       command=lambda i=pot_index: self.start_calibration(i)).pack(side=tk.LEFT, padx=(10, 2))
             
             # Crear figura de matplotlib individual
             fig = Figure(figsize=(5.5, 3.5), dpi=90)
@@ -183,7 +210,8 @@ class ArduinoMonitor:
             ax.set_ylabel('Valor', fontsize=9)
             ax.set_title(f'{pot_name}', fontsize=10, fontweight='bold', color=pot_info['color'])
             ax.grid(True, alpha=0.3, linestyle='--')
-            ax.set_ylim(0, 1100)
+            # Ajustar el rango Y para milímetros (0-50mm) con un pequeño margen
+            ax.set_ylim(-2, 52)
             ax.tick_params(labelsize=8)
             
             line, = ax.plot([], [], color=pot_info['color'], linewidth=2.5)
@@ -196,8 +224,54 @@ class ArduinoMonitor:
             self.axes[pot_name] = ax
             self.lines[pot_name] = line
             self.canvases[pot_name] = canvas
+            
+            # Añadir el objeto de texto para min/max
+            min_max_text = ax.text(0.02, 0.98, '', transform=ax.transAxes, fontsize=9,
+                                   verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.5))
+            self.min_max_texts[pot_name] = min_max_text
         
     def update_ports(self):
+        ports = [port.device for port in serial.tools.list_ports.comports()]
+        self.port_combo['values'] = ports
+        if ports:
+            self.port_combo.current(0)
+
+    def send_command(self, command):
+        if self.serial_conn and self.serial_conn.is_open:
+            try:
+                self.serial_conn.write(command.encode('utf-8'))
+                print(f"Comando enviado: {command}")
+                return True
+            except Exception as e:
+                messagebox.showerror("Error de Comunicación", f"No se pudo enviar el comando: {e}")
+                return False
+        else:
+            messagebox.showwarning("Desconectado", "No se puede enviar el comando. Conéctate a un puerto primero.")
+            return False
+
+    def set_transducer_range(self, pot_name, pot_index):
+        new_range = self.range_entries[pot_name].get()
+        # Nuevo formato de comando: R<index>,<range> ej: "R1,50.0"
+        if self.send_command(f'R{pot_index},{new_range}\n'):
+            messagebox.showinfo("Comando Enviado", f"Se envió el comando para establecer el rango a {new_range} mm.")
+
+    def start_calibration(self, pot_to_calibrate=None):
+        if not self.serial_conn or not self.serial_conn.is_open:
+            messagebox.showwarning("Desconectado", "Debes estar conectado a un puerto para iniciar la calibración.")
+            return
+
+        # Pausar la lectura de datos de potenciómetros y entrar en modo calibración
+        self.is_calibrating = True
+        if self.is_reading:
+            self.pause_btn.config(state='disabled')
+            self.record_btn.config(state='disabled')
+
+        # Crear la ventana de calibración
+        calibration_window = CalibrationWindow(self, pot_to_calibrate)
+
+        # Enviar el comando para iniciar la calibración
+        self.send_command('C\n')
+
         ports = [port.device for port in serial.tools.list_ports.comports()]
         self.port_combo['values'] = ports
         if ports:
@@ -274,8 +348,15 @@ class ArduinoMonitor:
         while self.is_reading:
             try:
                 if self.serial_conn and self.serial_conn.in_waiting and not self.is_paused:
-                    line = self.serial_conn.readline().decode('utf-8').strip()
-                    if line:
+                    # Usamos readline para capturar líneas completas
+                    line = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
+                    if not line:
+                        continue
+
+                    # Si estamos en modo calibración, enviamos el texto a la cola de calibración
+                    if self.is_calibrating:
+                        self.calibration_queue.put(line)
+                    elif line.startswith("Pot"): # Si no, procesamos como datos de potenciómetro
                         self.process_data(line)
             except Exception as e:
                 print(f"Error leyendo serial: {e}")
@@ -284,20 +365,24 @@ class ArduinoMonitor:
     def process_data(self, line):
         try:
             # Parsear datos: soporta separadores por coma (,) o por pipe (|)
-            # Esto hace el parseo más robusto a cambios en el formato del Arduino
             parts = line.replace('|', ',').split(',')
             for part in parts:
                 part = part.strip() # Eliminar espacios en blanco al inicio/final
-                if ':' in part:
+                if ':' in part: # Asegurarse de que el fragmento tiene el formato PotX:valor
                     split_part = part.split(':')
                     if len(split_part) != 2:
                         print(f"Skipping malformed data part: {part}")
                         continue  # Skip this part and move to the next
-                    pot_id, value = [s.strip() for s in split_part] # Limpiar espacios
-                    pot_name = pot_id if pot_id.startswith('Pot') else f'Pot{pot_id[1]}' # Acepta 'P1' o 'Pot1'
+                    pot_name, value_str = [s.strip() for s in split_part] # Limpiar espacios
                     
                     if pot_name in self.pot_data:
-                        raw_value = int(value)
+                        # ¡CORRECCIÓN CLAVE! Convertir a float, no a int.
+                        raw_value = float(value_str)
+
+                        # Si el valor es -1.0, significa que el sensor está desconectado. Lo ignoramos.
+                        if raw_value == -1.0:
+                            continue
+
                         pot_info = self.pot_data[pot_name]
                         
                         # Aplicar offset
@@ -310,9 +395,9 @@ class ArduinoMonitor:
                         if self.is_recording_session:
                             pot_info['all_values'].append(adjusted_value)
                             pot_info['all_times'].append(current_time)
-
+       
                         # Actualizar label
-                        self.pot_labels[pot_name].config(text=f"{adjusted_value}")
+                        self.pot_labels[pot_name].config(text=f"{adjusted_value:.3f} mm")
         except Exception as e:
             print(f"Error procesando datos: {e}")
     
@@ -324,6 +409,7 @@ class ArduinoMonitor:
             ax = self.axes[pot_name]
             line = self.lines[pot_name]
             canvas = self.canvases[pot_name]
+            min_max_text = self.min_max_texts[pot_name]
             
             if pot_info['enabled'] and pot_info['values']:
                 x_data = list(pot_info['times'])
@@ -333,16 +419,23 @@ class ArduinoMonitor:
                 # Ajustar límites X
                 if x_data:
                     ax.set_xlim(max(0, x_data[-1] - 30), x_data[-1] + 1)
-                # Ajustar límites Y dinámicamente
-                ax.relim()
-                ax.autoscale_view(scalex=False, scaley=True)
                 
                 line.set_visible(True)
                 ax.set_facecolor('white')
+
+                # Actualizar texto de min/max
+                min_val = pot_info['min_session']
+                max_val = pot_info['max_session']
+                if min_val is not None and max_val is not None:
+                    min_max_text.set_text(f'Min: {min_val:.2f}\nMax: {max_val:.2f}')
+                else:
+                    min_max_text.set_text('')
+                min_max_text.set_visible(True)
             else:
                 line.set_data([], [])
                 line.set_visible(False)
                 ax.set_facecolor('#f5f5f5')
+                min_max_text.set_visible(False)
             
             canvas.draw()
         
@@ -355,6 +448,8 @@ class ArduinoMonitor:
             pot_info['all_values'].clear()
             pot_info['all_times'].clear()
             pot_info['offset'] = 0 # Restablecer el offset
+            pot_info['min_session'] = None # Restablecer min/max
+            pot_info['max_session'] = None
         self.start_time = time.time()
 
         # Reiniciar estado de grabación si la conexión está activa
@@ -363,7 +458,7 @@ class ArduinoMonitor:
             self.record_btn.config(text="Iniciar Grabación", style='Record.TButton')
         
         for label in self.pot_labels.values():
-            label.config(text="---")
+            label.config(text="--- mm")
     
     def set_zero(self, pot_name):
         pot_info = self.pot_data[pot_name]
@@ -463,7 +558,7 @@ class ArduinoMonitor:
             for pot_name, pot_info in self.pot_data.items():
                 if pot_info['enabled'] and pot_info['values']:
                     data = list(pot_info['values'])
-                    raw_data = [v + pot_info['offset'] for v in data] # Reconstruir valores originales para estadísticas
+                    # Los valores en 'data' ya están ajustados por el offset.
                     avg = sum(data) / len(data)
                     min_val = min(data)
                     max_val = max(data)
@@ -471,7 +566,7 @@ class ArduinoMonitor:
                     
                     table_data.append([
                         f"{pot_name} (offset: {pot_info['offset']})",
-                        str(current),
+                        f"{current:.3f}",
                         f"{avg:.2f}",
                         str(min_val),
                         str(max_val),
@@ -539,6 +634,117 @@ class ArduinoMonitor:
             messagebox.showinfo("Reporte Generado", f"Reporte PDF generado exitosamente:\n{filename}\n\nIncluye gráficas de {len(enabled_list)} potenciómetros seleccionados.")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo generar el reporte: {str(e)}")
+
+class CalibrationWindow(tk.Toplevel):
+    def __init__(self, parent, pot_to_calibrate=None):
+        super().__init__(parent.root)
+        self.parent = parent
+        self.title("Asistente de Calibración")
+        self.geometry("700x550")
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.pot_to_calibrate = pot_to_calibrate
+
+        # Hacer la ventana modal
+        self.transient(parent.root)
+        self.grab_set()
+
+        # Estilo para el botón de calibración sugerido
+        self.style = ttk.Style()
+        self.style.configure('Suggested.TButton', background='#2ecc71', foreground='white', font=('Arial', 9, 'bold'))
+
+        self.setup_ui()
+        self.process_serial_queue()
+
+    def setup_ui(self):
+        main_frame = ttk.Frame(self, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- Terminal de Salida ---
+        terminal_frame = ttk.LabelFrame(main_frame, text="Salida del Arduino", padding=10)
+        terminal_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.terminal_text = tk.Text(terminal_frame, wrap=tk.WORD, height=20, font=("Courier New", 10), bg="#2c3e50", fg="#ecf0f1", insertbackground="white")
+        self.terminal_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(terminal_frame, command=self.terminal_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.terminal_text.config(yscrollcommand=scrollbar.set)
+
+        # --- Frame de Comandos ---
+        command_frame = ttk.LabelFrame(main_frame, text="Enviar Comandos", padding=10)
+        command_frame.pack(fill=tk.X)
+
+        # Botones de acceso rápido
+        btn_frame = ttk.Frame(command_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(btn_frame, text="Calibrar Transductor:").pack(side=tk.LEFT, padx=(0, 10))
+        for i in range(1, 5): # Crear los 4 botones
+            # Si se especificó un potenciómetro, resaltar ese botón
+            if self.pot_to_calibrate and i == self.pot_to_calibrate:
+                style = 'Suggested.TButton'
+            else:
+                style = 'TButton'
+            ttk.Button(btn_frame, text=str(i), width=3, style=style, command=lambda i=i: self.send_command(str(i))).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(btn_frame, text="Guardar y Salir (S)", command=lambda: self.send_command('S')).pack(side=tk.LEFT, padx=(20, 5))
+        ttk.Button(btn_frame, text="ENTER", command=lambda: self.send_command('\n')).pack(side=tk.LEFT, padx=5)
+
+        # Entrada manual
+        manual_frame = ttk.Frame(command_frame)
+        manual_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(manual_frame, text="Comando Manual:").pack(side=tk.LEFT, padx=(0, 10))
+        self.cmd_entry = ttk.Entry(manual_frame, width=20)
+        self.cmd_entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        self.cmd_entry.bind("<Return>", self.send_entry_command)
+
+        send_btn = ttk.Button(manual_frame, text="Enviar", command=self.send_entry_command)
+        send_btn.pack(side=tk.LEFT, padx=5)
+
+    def send_command(self, cmd):
+        # Añadimos un salto de línea para que el Arduino lo procese
+        full_cmd = cmd + '\n'
+        if self.parent.send_command(full_cmd):
+            self.terminal_text.insert(tk.END, f">>> {cmd}\n", "command_sent")
+            self.terminal_text.tag_config("command_sent", foreground="#3498db", font=("Courier New", 10, "bold"))
+            self.terminal_text.see(tk.END)
+
+    def send_entry_command(self, event=None):
+        cmd = self.cmd_entry.get()
+        if cmd:
+            self.send_command(cmd)
+            self.cmd_entry.delete(0, tk.END)
+
+    def process_serial_queue(self):
+        try:
+            while True:
+                line = self.parent.calibration_queue.get_nowait()
+                self.terminal_text.insert(tk.END, line + '\n')
+                self.terminal_text.see(tk.END) # Auto-scroll
+        except queue.Empty:
+            pass
+        finally:
+            # Re-agendar la revisión de la cola
+            self.after(100, self.process_serial_queue)
+
+    def on_close(self):
+        # Preguntar al usuario para evitar cierres accidentales
+        if messagebox.askyesno("Confirmar", "¿Estás seguro de que quieres cerrar el asistente de calibración?"):
+            # Limpiar la cola por si quedaron mensajes
+            while not self.parent.calibration_queue.empty():
+                try:
+                    self.parent.calibration_queue.get_nowait()
+                except queue.Empty:
+                    break
+            
+            # Restaurar el estado normal de la aplicación
+            self.parent.is_calibrating = False
+            if self.parent.is_reading:
+                self.parent.pause_btn.config(state='normal')
+                self.parent.record_btn.config(state='normal')
+            
+            self.destroy()
 
 def main():
     root = tk.Tk()

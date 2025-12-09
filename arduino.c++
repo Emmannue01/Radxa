@@ -1,26 +1,29 @@
 #include <EEPROM.h>
 #include <math.h> // Para usar sqrt()
 
-const int NUM_TRANSDUCERS = 4;
-const int transducerPins[NUM_TRANSDUCERS] = {A0, A1, A2, A3};
+const int NUM_TRANSDUCERS = 5;
+const int transducerPins[NUM_TRANSDUCERS] = {A0, A1, A2, A3, A4};
 
 // Cada transductor tiene su propio rango
-float rangoTotalMM[NUM_TRANSDUCERS] = {25.0, 25.0, 25.0, 25.0};
+float rangoTotalMM[NUM_TRANSDUCERS] = {25.0, 25.0, 25.0, 25.0, 25.0};
 const float V_REF = 5.0;
 const int ADC_RESOLUTION = 1024;
 
 // Valores de calibración por defecto
-int adcMin[NUM_TRANSDUCERS] = {100, 100, 100, 100};
-int adcMax[NUM_TRANSDUCERS] = {950, 950, 950, 950};
+int adcMin[NUM_TRANSDUCERS] = {100, 100, 100, 100, 100};
+int adcMax[NUM_TRANSDUCERS] = {950, 950, 950, 950, 950};
 
 const unsigned long INTERVAL = 100;
 unsigned long previousMillis = 0;
 const int NUM_SAMPLES = 10;
 
 int readings[NUM_TRANSDUCERS][NUM_SAMPLES];
-int readIndex[NUM_TRANSDUCERS] = {0};
-long total[NUM_TRANSDUCERS] = {0};
-int average[NUM_TRANSDUCERS] = {0};
+int readIndex[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
+long total[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
+int average[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
+
+// Nuevo: Array para saber qué transductores están habilitados para enviar datos
+bool transducerEnabled[NUM_TRANSDUCERS] = {false, false, false, false, false};
 
 // --- Configuración de EEPROM ---
 const int EEPROM_ADDR_START = 0;
@@ -66,23 +69,25 @@ void loop() {
   
   if (currentMillis - previousMillis >= INTERVAL) {
     previousMillis = currentMillis;
+    bool first_item = true; // Para controlar las comas
     for (int i = 0; i < NUM_TRANSDUCERS; i++) {
-      int adc = readFilteredADC(i, transducerPins[i]);
-      
-      // Si la lectura ADC es muy alta (típico de un pin PULLUP sin nada conectado),
-      // consideramos que el sensor está desconectado y enviamos un valor especial.
-      if (adc > 1000) { // Umbral para detectar desconexión en modo PULLUP
-        Serial.print(F("Pot")); Serial.print(i + 1);
-        Serial.print(F(":-1.0")); // Valor especial para "desconectado"
-      } else {
+      // Solo procesar y enviar si el transductor está habilitado
+      if (transducerEnabled[i]) {
+        if (!first_item) {
+          Serial.print(F(",")); // Separador
+        }
+        int adc = readFilteredADC(i, transducerPins[i]);
         float mm = adcToMM(adc, i);
         Serial.print(F("Pot")); Serial.print(i + 1);
         Serial.print(F(":"));
         Serial.print(mm, 3);
+        first_item = false;
       }
-      if (i < NUM_TRANSDUCERS - 1) Serial.print(F(",")); // Separador
     }
-    Serial.println();
+    // Solo enviar una nueva línea si se envió al menos un dato
+    if (!first_item) {
+      Serial.println();
+    }
   }
   
   if(Serial.available() > 0) {
@@ -91,6 +96,15 @@ void loop() {
       calibrateTransducers();
     } else if (cmd == 'R' || cmd == 'r') {
       handleRangeCommand();
+    } else if (cmd == 'E' || cmd == 'D') { // Comandos para Habilitar (E) o Deshabilitar (D)
+      int index = Serial.parseInt();
+      if (index > 0 && index <= NUM_TRANSDUCERS) {
+        if (cmd == 'E') {
+          transducerEnabled[index - 1] = true;
+        } else { // cmd == 'D'
+          transducerEnabled[index - 1] = false;
+        }
+      }
     }
   }
 }
@@ -331,7 +345,7 @@ void calibrateTransducers() {
     delay(50);
     while (Serial.available() > 0) Serial.read();
 
-    if (cmd >= '1' && cmd <= '4') {
+    if (cmd >= '1' && cmd <= '5') {
       calibrateSingleTransducer(cmd - '1');
     } else if (cmd == 'S' || cmd == 's') {
       break; // Salir del bucle de calibración

@@ -3,6 +3,7 @@
 
 const int NUM_TRANSDUCERS = 5;
 const int transducerPins[NUM_TRANSDUCERS] = {A0, A1, A2, A3, A4};
+const int ledPins[NUM_TRANSDUCERS] = {2, 3, 4, 5, 6}; // Pines digitales para LEDs
 
 float rangoTotalMM[NUM_TRANSDUCERS] = {25.0, 25.0, 25.0, 25.0, 25.0};
 const float V_REF = 5.0;
@@ -11,7 +12,7 @@ const int ADC_RESOLUTION = 1024;
 int adcMin[NUM_TRANSDUCERS] = {100, 100, 100, 100, 100};
 int adcMax[NUM_TRANSDUCERS] = {950, 950, 950, 950, 950};
 
-const unsigned long INTERVAL = 100;
+const unsigned long INTERVAL = 20;
 unsigned long previousMillis = 0;
 const int NUM_SAMPLES = 10;
 
@@ -22,6 +23,13 @@ int average[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
 
 bool transducerEnabled[NUM_TRANSDUCERS] = {false, false, false, false, false};
 
+// Variables para control de LEDs
+enum LedMode { LED_OFF, LED_ON, LED_BLINK };
+LedMode ledMode[NUM_TRANSDUCERS] = {LED_OFF, LED_OFF, LED_OFF, LED_OFF, LED_OFF};
+unsigned long ledBlinkMillis[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
+bool ledBlinkState[NUM_TRANSDUCERS] = {false, false, false, false, false};
+const unsigned long LED_BLINK_INTERVAL = 300; // Intervalo de parpadeo en ms
+
 const int EEPROM_ADDR_START = 0;
 const byte EEPROM_VERSION = 0x03;
 
@@ -29,11 +37,18 @@ void setup() {
   Serial.begin(9600);
   analogReference(DEFAULT);
   
+  // Configurar pines de transductores
   for(int i = 0; i < NUM_TRANSDUCERS; i++) {
     pinMode(transducerPins[i], INPUT_PULLUP);
     for(int j = 0; j < NUM_SAMPLES; j++) {
       readings[i][j] = 0;
     }
+  }
+  
+  // Configurar pines de LEDs
+  for(int i = 0; i < NUM_TRANSDUCERS; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    digitalWrite(ledPins[i], LOW);
   }
  
   if (!loadCalibrationFromEEPROM()) {
@@ -58,6 +73,10 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
   
+  // Actualizar LEDs con parpadeo
+  updateLEDs(currentMillis);
+  
+  // Enviar datos de los transductores
   if (currentMillis - previousMillis >= INTERVAL) {
     previousMillis = currentMillis;
     bool first_item = true;
@@ -70,7 +89,7 @@ void loop() {
         float mm = adcToMM(adc, i);
         Serial.print(F("Pot")); Serial.print(i + 1);
         Serial.print(F(":"));
-        Serial.print(mm, 3);
+        Serial.print(mm, 4);
         first_item = false;
       }
     }
@@ -79,29 +98,93 @@ void loop() {
     }
   }
   
+  // Procesar comandos seriales
   if(Serial.available() > 0) {
-    char cmd = Serial.read();
-    if (cmd == 'C' || cmd == 'c') {
-      calibrateTransducers();
-    } else if (cmd == 'R' || cmd == 'r') {
-      handleRangeCommand();
-    } else if (cmd == 'E' || cmd == 'D') { // Comandos para Habilitar (E) o Deshabilitar (D)
-      int index = Serial.parseInt();
-      if (index > 0 && index <= NUM_TRANSDUCERS) {
-        if (cmd == 'E') {
-          transducerEnabled[index - 1] = true;
-        } else { // cmd == 'D'
-          transducerEnabled[index - 1] = false;
-        }
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    processSerialCommand(cmd);
+  }
+}
+
+void processSerialCommand(String cmd) {
+  cmd.toUpperCase();
+  
+  // Comandos de LED: LON1-5, LOFF1-5, LBLINK1-5
+  if (cmd.startsWith("LON")) {
+    int index = cmd.substring(3).toInt() - 1;
+    if (index >= 0 && index < NUM_TRANSDUCERS) {
+      setLedMode(index, LED_ON);
+    }
+  } 
+  else if (cmd.startsWith("LOFF")) {
+    int index = cmd.substring(4).toInt() - 1;
+    if (index >= 0 && index < NUM_TRANSDUCERS) {
+      setLedMode(index, LED_OFF);
+    }
+  } 
+  else if (cmd.startsWith("LBLINK")) {
+    int index = cmd.substring(6).toInt() - 1;
+    if (index >= 0 && index < NUM_TRANSDUCERS) {
+      setLedMode(index, LED_BLINK);
+    }
+  }
+  // Comando de calibración
+  else if (cmd.startsWith("C")) {
+    calibrateTransducers();
+  }
+  // Comando de cambio de rango
+  else if (cmd.startsWith("R")) {
+    handleRangeCommand(cmd.substring(1));
+  }
+  // Comandos para Habilitar (E) o Deshabilitar (D)
+  else if (cmd.startsWith("E") || cmd.startsWith("D")) {
+    int index = cmd.substring(1).toInt() - 1;
+    if (index >= 0 && index < NUM_TRANSDUCERS) {
+      if (cmd.startsWith("E")) {
+        transducerEnabled[index] = true;
+        setLedMode(index, LED_ON);
+      } else {
+        transducerEnabled[index] = false;
+        setLedMode(index, LED_OFF);
       }
     }
   }
 }
 
+void setLedMode(int index, LedMode mode) {
+  if (index < 0 || index >= NUM_TRANSDUCERS) return;
+  
+  ledMode[index] = mode;
+  
+  switch(mode) {
+    case LED_OFF:
+      digitalWrite(ledPins[index], LOW);
+      break;
+    case LED_ON:
+      digitalWrite(ledPins[index], HIGH);
+      break;
+    case LED_BLINK:
+      ledBlinkMillis[index] = millis();
+      ledBlinkState[index] = false;
+      break;
+  }
+}
+
+void updateLEDs(unsigned long currentMillis) {
+  for (int i = 0; i < NUM_TRANSDUCERS; i++) {
+    if (ledMode[i] == LED_BLINK) {
+      if (currentMillis - ledBlinkMillis[i] >= LED_BLINK_INTERVAL) {
+        ledBlinkMillis[i] = currentMillis;
+        ledBlinkState[i] = !ledBlinkState[i];
+        digitalWrite(ledPins[i], ledBlinkState[i] ? HIGH : LOW);
+      }
+    }
+  }
+}
 
 int readFilteredADC(int transducer, int pin) {
   int newValue = analogRead(pin);
-  delay(1); // Pequeño delay para estabilizar lecturas consecutivas
+  delay(1);
   
   total[transducer] -= readings[transducer][readIndex[transducer]];
   readings[transducer][readIndex[transducer]] = newValue;
@@ -134,8 +217,10 @@ void promptForCalibration() {
   unsigned long startWait = millis();
   while(millis() - startWait < 5000) {
     if(Serial.available() > 0) {
-      char cmd = Serial.read();
-      if(cmd == 'C' || cmd == 'c') {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      cmd.toUpperCase();
+      if(cmd.startsWith("C")) {
         calibrateTransducers();
         break;
       }
@@ -160,6 +245,9 @@ void printCalibrationMenu() {
 }
 
 void calibrateSingleTransducer(int index) {
+  // Activar parpadeo del LED durante calibración
+  setLedMode(index, LED_BLINK);
+  
   char transducerName[4];
   sprintf(transducerName, "T%d", index + 1);
 
@@ -207,11 +295,19 @@ void calibrateSingleTransducer(int index) {
     Serial.println(F("⚠ Calibración inválida. Repite el proceso."));
     adcMin[index] = 100;
     adcMax[index] = 950;
+    setLedMode(index, LED_OFF);
   } else {
     int range = adcMax[index] - adcMin[index];
     Serial.print(F("Rango ADC: ")); Serial.println(range);
     Serial.print(F("Resolución: ")); Serial.print((float)range / rangoTotalMM[index], 3);
     Serial.println(F(" puntos ADC/mm"));
+    
+    // Restaurar LED a encendido si el transductor está habilitado
+    if (transducerEnabled[index]) {
+      setLedMode(index, LED_ON);
+    } else {
+      setLedMode(index, LED_OFF);
+    }
   }
   
   delay(1500);
@@ -309,16 +405,21 @@ bool verifyCalibration(int transducerIndex) {
 void calibrateTransducers() {
   while (true) {
     printCalibrationMenu();
-    while (Serial.available() == 0) { delay(100); }
-    char cmd = Serial.read();
+    while (Serial.available() == 0) { 
+      updateLEDs(millis()); // Mantener actualización de LEDs durante espera
+      delay(100); 
+    }
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    cmd.toUpperCase();
     Serial.println(cmd);
     
     delay(50);
     while (Serial.available() > 0) Serial.read();
 
-    if (cmd >= '1' && cmd <= '5') {
-      calibrateSingleTransducer(cmd - '1');
-    } else if (cmd == 'S' || cmd == 's') {
+    if (cmd.length() == 1 && cmd[0] >= '1' && cmd[0] <= '5') {
+      calibrateSingleTransducer(cmd[0] - '1');
+    } else if (cmd.startsWith("S")) {
       break;
     } else {
       Serial.println(F("Opción no válida. Inténtalo de nuevo."));
@@ -351,6 +452,7 @@ void waitForEnter() {
   
   Serial.println(F("Presiona ENTER para continuar..."));
   while (true) {
+    updateLEDs(millis()); // Mantener actualización de LEDs durante espera
     if (Serial.available() > 0) {
       char c = Serial.read();
       if (c == '\n' || c == '\r') {
@@ -361,9 +463,7 @@ void waitForEnter() {
   while (Serial.available() > 0) Serial.read();
 }
 
-void handleRangeCommand() {
-  delay(50);
-  String input = Serial.readStringUntil('\n');
+void handleRangeCommand(String input) {
   input.trim();
   
   int commaIndex = input.indexOf(',');

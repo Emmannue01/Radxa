@@ -1,15 +1,13 @@
 #include <EEPROM.h>
-#include <math.h> // Para usar sqrt()
+#include <math.h>
 
 const int NUM_TRANSDUCERS = 5;
 const int transducerPins[NUM_TRANSDUCERS] = {A0, A1, A2, A3, A4};
 
-// Cada transductor tiene su propio rango
 float rangoTotalMM[NUM_TRANSDUCERS] = {25.0, 25.0, 25.0, 25.0, 25.0};
 const float V_REF = 5.0;
 const int ADC_RESOLUTION = 1024;
 
-// Valores de calibración por defecto
 int adcMin[NUM_TRANSDUCERS] = {100, 100, 100, 100, 100};
 int adcMax[NUM_TRANSDUCERS] = {950, 950, 950, 950, 950};
 
@@ -22,32 +20,25 @@ int readIndex[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
 long total[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
 int average[NUM_TRANSDUCERS] = {0, 0, 0, 0, 0};
 
-// Nuevo: Array para saber qué transductores están habilitados para enviar datos
 bool transducerEnabled[NUM_TRANSDUCERS] = {false, false, false, false, false};
 
-// --- Configuración de EEPROM ---
 const int EEPROM_ADDR_START = 0;
-const byte EEPROM_VERSION = 0x03; // Versión incrementada por el cambio en la estructura de datos (añadimos rangos)
+const byte EEPROM_VERSION = 0x03;
 
 void setup() {
   Serial.begin(9600);
   analogReference(DEFAULT);
   
-  // Configurar pines con resistencia PULL-DOWN interna para evitar lecturas flotantes.
-  // Si un pin no está conectado, leerá un valor cercano a 0.
   for(int i = 0; i < NUM_TRANSDUCERS; i++) {
-    pinMode(transducerPins[i], INPUT_PULLUP); // Se usa PULLUP y se invierte la lógica, es más estable.
+    pinMode(transducerPins[i], INPUT_PULLUP);
     for(int j = 0; j < NUM_SAMPLES; j++) {
       readings[i][j] = 0;
     }
   }
  
-  // Intentar cargar la calibración desde la EEPROM
   if (!loadCalibrationFromEEPROM()) {
-    // Si falla, ofrecer calibración manual
     promptForCalibration();
   } else {
-    // Mostrar valores cargados
     Serial.println(F("\nValores de calibración cargados:"));
     for (int i = 0; i < NUM_TRANSDUCERS; i++) {
       Serial.print(F("T")); Serial.print(i + 1);
@@ -69,12 +60,11 @@ void loop() {
   
   if (currentMillis - previousMillis >= INTERVAL) {
     previousMillis = currentMillis;
-    bool first_item = true; // Para controlar las comas
+    bool first_item = true;
     for (int i = 0; i < NUM_TRANSDUCERS; i++) {
-      // Solo procesar y enviar si el transductor está habilitado
       if (transducerEnabled[i]) {
         if (!first_item) {
-          Serial.print(F(",")); // Separador
+          Serial.print(F(","));
         }
         int adc = readFilteredADC(i, transducerPins[i]);
         float mm = adcToMM(adc, i);
@@ -84,7 +74,6 @@ void loop() {
         first_item = false;
       }
     }
-    // Solo enviar una nueva línea si se envió al menos un dato
     if (!first_item) {
       Serial.println();
     }
@@ -109,7 +98,6 @@ void loop() {
   }
 }
 
-// --- Funciones de lectura y conversión ---
 
 int readFilteredADC(int transducer, int pin) {
   int newValue = analogRead(pin);
@@ -125,9 +113,7 @@ int readFilteredADC(int transducer, int pin) {
 }
 
 float adcToMM(int adcValue, int transducerIndex) {
-  // Usar directamente los arrays globales
   if (adcMax[transducerIndex] == adcMin[transducerIndex]) {
-    // Evitar división por cero
     return 0;
   }
   
@@ -135,14 +121,11 @@ float adcToMM(int adcValue, int transducerIndex) {
                     (float)(adcMax[transducerIndex] - adcMin[transducerIndex]);
   float mm = normalized * rangoTotalMM[transducerIndex];
   
-  // Limitar valores
   if (mm < 0) mm = 0;
   if (mm > rangoTotalMM[transducerIndex]) mm = rangoTotalMM[transducerIndex];
   
   return mm;
 }
-
-// --- Funciones de calibración ---
 
 void promptForCalibration() {
   Serial.println();
@@ -186,7 +169,6 @@ void calibrateSingleTransducer(int index) {
   Serial.println(F("╚════════════════════════════════════╝"));
   Serial.println();
   
-  // Paso 1: 0mm
   Serial.print(F("PASO 1: Coloca TRANSDUCTOR ")); Serial.print(index + 1); Serial.println(F(" en 0mm"));
   Serial.println(F("        Presiona ENTER..."));
   waitForEnter();
@@ -198,14 +180,13 @@ void calibrateSingleTransducer(int index) {
   Serial.println();
   delay(1000);
   
-  // Paso 2: Rango máximo
   Serial.print(F("PASO 2: Coloca TRANSDUCTOR ")); Serial.print(index + 1); Serial.print(F(" en "));
   Serial.print(rangoTotalMM[index]); Serial.println(F("mm (rango máximo)"));
   Serial.println(F("        Presiona ENTER..."));
   waitForEnter();
   
   char rangeStr[10];
-  dtostrf(rangoTotalMM[index], 4, 1, rangeStr); // Convert float to string
+  dtostrf(rangoTotalMM[index], 4, 1, rangeStr);
   strcat(rangeStr, "mm");
   adcMax[index] = calibratePosition(transducerPins[index], rangeStr);
   
@@ -213,8 +194,6 @@ void calibrateSingleTransducer(int index) {
   Serial.println(adcMax[index]);
   Serial.println();
 
-  // *** SOLUCIÓN: Detectar y corregir inversión ***
-  // Si el valor mínimo es mayor que el máximo, los intercambiamos.
   if (adcMin[index] > adcMax[index]) {
     Serial.println(F("ℹ  Valores invertidos detectados. Corrigiendo automáticamente..."));
     int temp = adcMin[index];
@@ -224,13 +203,11 @@ void calibrateSingleTransducer(int index) {
     Serial.print(F(", Max=")); Serial.println(adcMax[index]);
   }
   
-  // Verificar calibración
   if (!verifyCalibration(index)) {
     Serial.println(F("⚠ Calibración inválida. Repite el proceso."));
-    adcMin[index] = 100;  // Valores por defecto
+    adcMin[index] = 100;
     adcMax[index] = 950;
   } else {
-    // Mostrar diferencia
     int range = adcMax[index] - adcMin[index];
     Serial.print(F("Rango ADC: ")); Serial.println(range);
     Serial.print(F("Resolución: ")); Serial.print((float)range / rangoTotalMM[index], 3);
@@ -249,17 +226,14 @@ int calibratePosition(int pin, const char* positionName) {
   long sum = 0;
   int readingsArray[numReadings];
   
-  // Tomar lecturas
   for(int i = 0; i < numReadings; i++) {
     readingsArray[i] = analogRead(pin);
     sum += readingsArray[i];
     delay(20);
   }
   
-  // Calcular promedio
   int avg = sum / numReadings;
   
-  // Calcular desviación estándar para verificar estabilidad
   long sumSqDiff = 0;
   for(int i = 0; i < numReadings; i++) {
     long diff = readingsArray[i] - avg;
@@ -273,11 +247,10 @@ int calibratePosition(int pin, const char* positionName) {
   Serial.print(stdDev);
   Serial.println(F(")"));
   
-  if (stdDev > 10) { // Si hay mucha variación
+  if (stdDev > 10) {
     Serial.println(F("⚠ Advertencia: Lecturas inestables. Reposiciona el transductor."));
   }
   
-  // *** NUEVA LÓGICA: Encontrar la moda (valor más frecuente) en lugar del promedio ***
   int mode = 0;
   int maxCount = 0;
   for (int i = 0; i < numReadings; i++) {
@@ -293,7 +266,6 @@ int calibratePosition(int pin, const char* positionName) {
     }
   }
 
-  // Si la moda es muy diferente del promedio, podría ser un error. En ese caso, usar el promedio.
   if (abs(mode - avg) > stdDev * 2) {
     Serial.println(F("ℹ  Moda inconsistente, usando promedio para seguridad."));
     return avg;
@@ -341,20 +313,18 @@ void calibrateTransducers() {
     char cmd = Serial.read();
     Serial.println(cmd);
     
-    // Limpiar buffer
     delay(50);
     while (Serial.available() > 0) Serial.read();
 
     if (cmd >= '1' && cmd <= '5') {
       calibrateSingleTransducer(cmd - '1');
     } else if (cmd == 'S' || cmd == 's') {
-      break; // Salir del bucle de calibración
+      break;
     } else {
       Serial.println(F("Opción no válida. Inténtalo de nuevo."));
     }
   }
 
-  // Guardar los nuevos valores en la EEPROM
   saveCalibrationToEEPROM();
 
   Serial.println(F("========================================"));
@@ -376,10 +346,8 @@ void calibrateTransducers() {
   delay(2000);
 }
 
-// --- Funciones de utilidad ---
-
 void waitForEnter() {
-  while (Serial.available() > 0) Serial.read(); // Limpiar buffer
+  while (Serial.available() > 0) Serial.read();
   
   Serial.println(F("Presiona ENTER para continuar..."));
   while (true) {
@@ -390,16 +358,14 @@ void waitForEnter() {
       }
     }
   }
-  // Limpiar cualquier carácter restante
   while (Serial.available() > 0) Serial.read();
 }
 
 void handleRangeCommand() {
-  delay(50); // Espera para que llegue el resto del comando
+  delay(50);
   String input = Serial.readStringUntil('\n');
   input.trim();
   
-  // Buscar la coma
   int commaIndex = input.indexOf(',');
   if (commaIndex > 0) {
     String indexStr = input.substring(0, commaIndex);
@@ -422,11 +388,9 @@ void handleRangeCommand() {
   }
 }
 
-// --- Funciones de EEPROM ---
-
 void saveCalibrationToEEPROM() {
   int addr = EEPROM_ADDR_START;
-  EEPROM.update(addr, EEPROM_VERSION); // Usar update para escribir solo si el valor cambia
+  EEPROM.update(addr, EEPROM_VERSION);
   addr += sizeof(byte);
 
   for (int i = 0; i < NUM_TRANSDUCERS; i++) {
@@ -437,7 +401,6 @@ void saveCalibrationToEEPROM() {
     EEPROM.put(addr, adcMax[i]);
     addr += sizeof(int);
   }
-  // Guardar también los rangos
   for (int i = 0; i < NUM_TRANSDUCERS; i++) {
     EEPROM.put(addr, rangoTotalMM[i]);
     addr += sizeof(float);
@@ -448,24 +411,17 @@ void saveCalibrationToEEPROM() {
 bool loadCalibrationFromEEPROM() {
   int addr = EEPROM_ADDR_START;
   
-  // Verificar si la EEPROM está vacía o corrupta
   byte version = EEPROM.read(addr);
   
-  // Serial.print(F("Versión en EEPROM: 0x"));
-  // Serial.println(version, HEX);
-  // Serial.print(F("Versión esperada: 0x"));
-  // Serial.println(EEPROM_VERSION, HEX);
-  
-  if (version == 0xFF) { // EEPROM vacía
+  if (version == 0xFF) {
     Serial.println(F("! EEPROM vacía. Usando valores por defecto."));
-    return false; // No se cargó nada, se usarán los defaults
+    return false;
   }
   
   if (version == EEPROM_VERSION) {
     Serial.println(F("✓ Versión de calibración compatible"));
     addr += sizeof(byte);
     
-    // Cargar valores
     for (int i = 0; i < NUM_TRANSDUCERS; i++) {
       EEPROM.get(addr, adcMin[i]);
       addr += sizeof(int);
@@ -479,7 +435,6 @@ bool loadCalibrationFromEEPROM() {
       addr += sizeof(float);
     }
     
-    // Verificar todos los transductores
     bool allValid = true;
     for (int i = 0; i < NUM_TRANSDUCERS; i++) {
       if (!verifyCalibration(i)) {
@@ -492,7 +447,6 @@ bool loadCalibrationFromEEPROM() {
       return true;
     } else {
       Serial.println(F("! Calibración en EEPROM inválida. Usando valores por defecto."));
-      // Restaurar valores por defecto
       for (int i = 0; i < NUM_TRANSDUCERS; i++) {
         adcMin[i] = 100;
         adcMax[i] = 950;

@@ -12,7 +12,7 @@ const int ADC_RESOLUTION = 1024;
 int adcMin[NUM_TRANSDUCERS] = {100, 100, 100, 100, 100};
 int adcMax[NUM_TRANSDUCERS] = {950, 950, 950, 950, 950};
 
-const unsigned long INTERVAL = 20;
+const unsigned long INTERVAL = 10;
 unsigned long previousMillis = 0;
 const int NUM_SAMPLES = 10;
 

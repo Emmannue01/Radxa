@@ -83,6 +83,10 @@ class ArduinoMonitor:
         style.configure('Small.TButton', font=('Arial', 9, 'bold'), padding=(8, 4), foreground='black', background='#ecf0f1')
         style.map('Small.TButton', background=[('active', '#bdc3c7')])
         
+        style.configure("Treeview", font=('Arial', 9), rowheight=22, background="#ffffff", fieldbackground="#ffffff")
+        style.configure("Treeview.Heading", font=('Arial', 9, 'bold'), background="#dfe6e9", foreground="#2d3436")
+        style.map("Treeview", background=[('selected', '#3498db')], foreground=[('selected', 'white')])
+
         control_frame = ttk.LabelFrame(main_frame, text="Control de Conexión", padding="10")
         control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10), padx=(0, 10))
         
@@ -123,6 +127,7 @@ class ArduinoMonitor:
         self.range_entries = {}
         self.canvases = {}
         self.min_max_texts = {}
+        self.recent_tables = {}
         
         positions = [
             ('Pot1', 0, 0, 1),
@@ -169,8 +174,10 @@ class ArduinoMonitor:
             ttk.Button(top_frame, text="Establecer rango de transductor", style='Small.TButton',
                        command=lambda p=pot_name, i=pot_index: self.set_transducer_range(p, i)).pack(side=tk.LEFT, padx=2)
 
+            content_frame = ttk.Frame(pot_container)
+            content_frame.pack(fill=tk.BOTH, expand=True)
 
-            fig = Figure(figsize=(5.5, 3.5), dpi=90)
+            fig = Figure(figsize=(4.2, 3.5), dpi=90)
             ax = fig.add_subplot(111)
             ax.set_xlabel('Tiempo (s)', fontsize=9)
             ax.set_ylabel('Valor', fontsize=9)
@@ -181,13 +188,26 @@ class ArduinoMonitor:
             
             line, = ax.plot([], [], color=pot_info['color'], linewidth=2.5)
             
-            canvas = FigureCanvasTkAgg(fig, master=pot_container)
+            canvas = FigureCanvasTkAgg(fig, master=content_frame)
             canvas.draw()
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             
             self.axes[pot_name] = ax
             self.lines[pot_name] = line
             self.canvases[pot_name] = canvas
+            
+            table_frame = ttk.Frame(content_frame)
+            table_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(2, 5), pady=5)
+            
+            tree = ttk.Treeview(table_frame, columns=('time', 'val'), show='headings', height=6)
+            tree.heading('time', text='T(s)')
+            tree.heading('val', text='Valor')
+            tree.column('time', width=50, anchor='center')
+            tree.column('val', width=60, anchor='center')
+            tree.tag_configure('odd', background='#f1f2f6')
+            tree.tag_configure('even', background='#ffffff')
+            tree.pack(fill=tk.BOTH, expand=True)
+            self.recent_tables[pot_name] = tree
             
             min_max_text = ax.text(0.02, 0.98, '', transform=ax.transAxes, fontsize=9,
                                    verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.5))
@@ -545,11 +565,35 @@ class ArduinoMonitor:
                 else:
                     min_max_text.set_text('')
                 min_max_text.set_visible(True)
+                
+                tree = self.recent_tables[pot_name]
+                for item in tree.get_children():
+                    tree.delete(item)
+                
+                if self.is_recording_session:
+                    times = pot_info['times']
+                    values = pot_info['values']
+                    if times:
+                        last_t = times[-1]
+                        idx = len(times) - 1
+                        row_count = 0
+                        while idx >= 0:
+                            t = times[idx]
+                            if last_t - t > 1.0:
+                                break
+                            tag = 'even' if row_count % 2 == 0 else 'odd'
+                            tree.insert('', 'end', values=(f"{t:.2f}", f"{values[idx]:.4f}"), tags=(tag,))
+                            idx -= 1
+                            row_count += 1
             else:
                 line.set_data([], [])
                 line.set_visible(False)
                 ax.set_facecolor('#f5f5f5')
                 min_max_text.set_visible(False)
+                
+                tree = self.recent_tables[pot_name]
+                for item in tree.get_children():
+                    tree.delete(item)
             
             canvas.draw()
         

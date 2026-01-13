@@ -52,7 +52,8 @@ class ArduinoMonitor:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=0)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(0, weight=0)
         main_frame.rowconfigure(1, weight=1)
         
         style = ttk.Style()
@@ -87,155 +88,193 @@ class ArduinoMonitor:
         style.configure("Treeview.Heading", font=('Arial', 9, 'bold'), background="#dfe6e9", foreground="#2d3436")
         style.map("Treeview", background=[('selected', '#3498db')], foreground=[('selected', 'white')])
 
+        # Crear estilos dinámicos para cada sensor
+        pot_colors = {
+            'Pot1': '#e74c3c',
+            'Pot2': '#3498db',
+            'Pot3': '#2ecc71',
+            'Pot4': '#f39c12',
+            'Pot5': '#9b59b6'
+        }
+        
+        for pot_name, color in pot_colors.items():
+            style.configure(f'{pot_name}.TCheckbutton', background=color, foreground='white', font=('Arial', 9, 'bold'))
+            style.map(f'{pot_name}.TCheckbutton', background=[('active', color)])
+            style.configure(f'{pot_name}.TLabel', background=color, foreground='white', font=('Arial', 9))
+
         control_frame = ttk.LabelFrame(main_frame, text="Control de Conexión", padding="10")
-        control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10), padx=(0, 10))
+        control_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5), padx=5)
         
-        ttk.Label(control_frame, text="Puerto:").grid(row=0, column=0, padx=5)
-        self.port_combo = ttk.Combobox(control_frame, width=15, state='readonly', font=('Arial', 10))
-        self.port_combo.grid(row=0, column=1, padx=5)
+        # Configurar columnas responsivas
+        control_frame.columnconfigure(0, weight=0)   # Puerto
+        control_frame.columnconfigure(1, weight=0)   # Combobox
+        control_frame.columnconfigure(2, weight=0)   # Actualizar
+        control_frame.columnconfigure(3, weight=0)   # Conectar
+        control_frame.columnconfigure(4, weight=0)   # Iniciar captura
+        control_frame.columnconfigure(5, weight=0)   # Separador grande
+        control_frame.columnconfigure(6, weight=1)   # Espacio flexible
+        control_frame.columnconfigure(7, weight=0)   # Calibración
+        control_frame.columnconfigure(8, weight=0)   # CSV
+        control_frame.columnconfigure(9, weight=0)   # PDF
         
-        ttk.Button(control_frame, text="Actualizar lista de controladores", command=self.update_ports, style='Action.TButton').grid(row=0, column=2, padx=5)
         
-        self.connect_btn = ttk.Button(control_frame, text="Conectar controlador", command=self.toggle_connection, style='Connect.TButton')
-        self.connect_btn.grid(row=0, column=3, padx=5)
+        ttk.Label(control_frame, text="Puerto:").grid(row=0, column=0, padx=3, sticky=tk.W)
+        self.port_combo = ttk.Combobox(control_frame, width=10, state='readonly', font=('Arial', 9))
+        self.port_combo.grid(row=0, column=1, padx=3, sticky=(tk.W, tk.E))
         
-        self.record_btn = ttk.Button(control_frame, text="Iniciar captura de datos", command=self.toggle_recording, state='disabled', style='Record.TButton')
-        self.record_btn.grid(row=0, column=4, padx=10)
+        ttk.Button(control_frame, text="Actualizar", command=self.update_ports, style='Action.TButton').grid(row=0, column=2, padx=3)
+        
+        self.connect_btn = ttk.Button(control_frame, text="Conectar", command=self.toggle_connection, style='Connect.TButton')
+        self.connect_btn.grid(row=0, column=3, padx=3)
+        
+        self.record_btn = ttk.Button(control_frame, text="Iniciar captura", command=self.toggle_recording, state='disabled', style='Record.TButton')
+        self.record_btn.grid(row=0, column=4, padx=3)
+        
+         # Botón de Calibración
+        ttk.Button(control_frame, text="Abrir Calibración", command=self.show_calibration_popup, style='Action.TButton').grid(row=0, column=7, padx=3)
+        
+        # Botones de reportes
+        ttk.Button(control_frame, text="Guardar CSV", command=self.export_csv, style='Report.TButton').grid(row=0, column=8, padx=3)
+        ttk.Button(control_frame, text="Guardar PDF", command=self.generate_pdf_report, style='Report.TButton').grid(row=0, column=9, padx=3)
+        
+       
+        
 
-        report_frame = ttk.LabelFrame(main_frame, text="Reportes", padding="10")
-        report_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        
-        ttk.Button(report_frame, text="Guardar captura de datos en CSV", command=self.export_csv, style='Report.TButton').pack(pady=5, padx=5, fill=tk.X)
-        ttk.Button(report_frame, text="Guardar captura de datos en PDF", command=self.generate_pdf_report, style='Report.TButton').pack(pady=5, padx=5, fill=tk.X)
-
-        main_frame.columnconfigure(2, weight=0)
-        
-        graph_frame = ttk.Frame(main_frame)
+        # Gráfica única - abarca todo el ancho y alto disponible
+        graph_frame = ttk.LabelFrame(main_frame, text="Monitoreo de Transductores", padding="5")
         graph_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         graph_frame.columnconfigure(0, weight=1)
-        graph_frame.columnconfigure(1, weight=1)
-        graph_frame.rowconfigure(0, weight=1)
-        graph_frame.rowconfigure(1, weight=1)
+        graph_frame.rowconfigure(0, weight=0)
+        graph_frame.rowconfigure(1, weight=0)
         graph_frame.rowconfigure(2, weight=1)
+        
+        # Frame para los checkboxes y botones de sensores
+        sensor_control_frame = ttk.Frame(graph_frame)
+        sensor_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        
+        # Configurar columnas para distribución equitativa
+        for col in range(15):
+            sensor_control_frame.columnconfigure(col, weight=1)
         
         self.pot_vars = {}
         self.pot_labels = {}
         self.tare_buttons = {}
-        self.axes = {}
-        self.lines = {}
         self.range_entries = {}
-        self.canvases = {}
-        self.min_max_texts = {}
-        self.recent_tables = {}
         
-        positions = [
-            ('Pot1', 0, 0, 1),
-            ('Pot2', 0, 1, 1),
-            ('Pot3', 1, 0, 1),
-            ('Pot4', 1, 1, 1),
-            ('Pot5', 2, 0, 1)
-        ]
-        
-        for pot_name, row, col, colspan in positions:
+        for i, pot_name in enumerate(['Pot1', 'Pot2', 'Pot3', 'Pot4', 'Pot5']):
             pot_info = self.pot_data[pot_name]
-            
-            pot_container = ttk.LabelFrame(graph_frame, text="", padding="5")
-            pot_container.grid(row=row, column=col, columnspan=colspan, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
-            
-            top_frame = ttk.Frame(pot_container)
-            top_frame.pack(fill=tk.X, pady=(0, 2))
             
             var = tk.BooleanVar(value=False)
             self.pot_vars[pot_name] = var
             
-            cb = ttk.Checkbutton(top_frame, text=pot_name.replace('Pot', 'Sensor '), variable=var,
-                                command=lambda p=pot_name: self.toggle_pot(p))
-            cb.pack(side=tk.LEFT, padx=5)
+            col_start = i * 3
             
-            label = ttk.Label(top_frame, text="---", 
-                            foreground=pot_info['color'], font=('Arial', 16, 'bold'))
-            label.pack(side=tk.LEFT, padx=10)
+            # Frame coloreado que ocupa todo el espacio
+            pot_frame = tk.Frame(sensor_control_frame, bg=pot_info['color'], highlightthickness=0)
+            pot_frame.grid(row=0, column=col_start, columnspan=3, padx=2, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
+            pot_frame.columnconfigure(0, weight=1)
+            pot_frame.columnconfigure(1, weight=1)
+            pot_frame.columnconfigure(2, weight=1)
+            pot_frame.rowconfigure(0, weight=1)
+            
+            # Interior frame con mismo color para llenar todo
+            inner_frame = tk.Frame(pot_frame, bg=pot_info['color'])
+            inner_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            inner_frame.columnconfigure(0, weight=1)
+            inner_frame.columnconfigure(1, weight=1)
+            inner_frame.columnconfigure(2, weight=1)
+            
+            # Checkbox con estilo coloreado
+            cb = ttk.Checkbutton(inner_frame, text=pot_name.replace('Pot', 'Sensor '), variable=var,
+                                command=lambda p=pot_name: self.toggle_pot(p), style=f'{pot_name}.TCheckbutton')
+            cb.grid(row=0, column=0, columnspan=1, padx=3, pady=6, sticky=(tk.W, tk.E))
+            
+            # Label de valor prominente
+            label = tk.Label(inner_frame, text="---", 
+                            foreground='white', bg=pot_info['color'], font=('Arial', 13, 'bold'), padx=6, pady=4)
+            label.grid(row=0, column=1, columnspan=1, padx=3, pady=6, sticky=(tk.W, tk.E))
             self.pot_labels[pot_name] = label
             
-            tare_btn = ttk.Button(top_frame, text="Poner a 0", style='Small.TButton',
-                                  command=lambda p=pot_name: self.set_zero(p))
-            tare_btn.pack(side=tk.LEFT, padx=5)
+            # Botón de poner a 0
+            tare_btn = ttk.Button(inner_frame, text="PONER A 0", style='Small.TButton',
+                                  command=lambda p=pot_name: self.set_zero(p), width=10)
+            tare_btn.grid(row=0, column=2, columnspan=1, padx=3, pady=6, sticky=(tk.W, tk.E))
             self.tare_buttons[pot_name] = tare_btn
 
-            ttk.Label(top_frame).pack(side=tk.LEFT, padx=(20, 2))
-            range_entry = ttk.Entry(top_frame, width=8, font=('Arial', 9))
+            # Entrada de rango
+            range_entry = ttk.Entry(inner_frame, width=8, font=('Arial', 9))
             range_entry.insert(0, "25.0")
-            range_entry.pack(side=tk.LEFT, padx=2)
             self.range_entries[pot_name] = range_entry
 
             pot_index = int(pot_name.replace('Pot', ''))
-
-            ttk.Button(top_frame, text="Establecer rango de transductor", style='Small.TButton',
-                       command=lambda p=pot_name, i=pot_index: self.set_transducer_range(p, i)).pack(side=tk.LEFT, padx=2)
-
-            content_frame = ttk.Frame(pot_container)
-            content_frame.pack(fill=tk.BOTH, expand=True)
-
-            fig = Figure(figsize=(4.2, 3.5), dpi=90)
-            ax = fig.add_subplot(111)
-            ax.set_xlabel('Tiempo (s)', fontsize=9)
-            ax.set_ylabel('Valor', fontsize=9)
-            ax.set_title(f"{pot_name.replace('Pot', 'Sensor ')}", fontsize=10, fontweight='bold', color=pot_info['color'])
-            ax.grid(True, alpha=0.4, linestyle='--')
-            ax.tick_params(labelsize=8)
-            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+        
+        # Frame secundario para rangos
+        range_control_frame = ttk.Frame(graph_frame)
+        range_control_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        
+        for col in range(15):
+            range_control_frame.columnconfigure(col, weight=1)
+        
+        for i, pot_name in enumerate(['Pot1', 'Pot2', 'Pot3', 'Pot4', 'Pot5']):
+            col_start = i * 3
+            pot_index = int(pot_name.replace('Pot', ''))
+            pot_info = self.pot_data[pot_name]
             
-            line, = ax.plot([], [], color=pot_info['color'], linewidth=2.5)
+            # Frame coloreado para rango
+            range_pot_frame = tk.Frame(range_control_frame, bg=pot_info['color'], highlightthickness=0)
+            range_pot_frame.grid(row=0, column=col_start, columnspan=3, padx=2, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
+            range_pot_frame.columnconfigure(0, weight=1)
+            range_pot_frame.columnconfigure(1, weight=1)
+            range_pot_frame.columnconfigure(2, weight=1)
+            range_pot_frame.rowconfigure(0, weight=1)
             
-            canvas = FigureCanvasTkAgg(fig, master=content_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            # Interior frame con mismo color
+            range_inner_frame = tk.Frame(range_pot_frame, bg=pot_info['color'])
+            range_inner_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            range_inner_frame.columnconfigure(0, weight=1)
+            range_inner_frame.columnconfigure(1, weight=1)
+            range_inner_frame.columnconfigure(2, weight=1)
             
-            self.axes[pot_name] = ax
+            ttk.Label(range_inner_frame, text="Rango:", font=('Arial', 9), style=f'{pot_name}.TLabel').grid(row=0, column=0, columnspan=1, padx=3, pady=5, sticky=(tk.W, tk.E))
+            
+            range_entry = self.range_entries[pot_name]
+            range_entry.grid(row=0, column=1, columnspan=1, padx=3, pady=5, sticky=(tk.W, tk.E))
+            
+            ttk.Button(range_inner_frame, text="Set", style='Small.TButton',
+                       command=lambda p=pot_name, i=pot_index: self.set_transducer_range(p, i)).grid(row=0, column=2, columnspan=1, padx=3, pady=5, sticky=(tk.W, tk.E))
+        
+        # Canvas para la gráfica única
+        canvas_frame = ttk.Frame(graph_frame)
+        canvas_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        canvas_frame.columnconfigure(0, weight=1)
+        canvas_frame.rowconfigure(0, weight=1)
+        
+        fig = Figure(figsize=(12, 5), dpi=90)
+        self.ax_main = fig.add_subplot(111)
+        self.ax_main.set_xlabel('Tiempo (s)', fontsize=10)
+        self.ax_main.set_ylabel('Valor (mm)', fontsize=10)
+        self.ax_main.set_title("Monitoreo en Tiempo Real", fontsize=12, fontweight='bold')
+        self.ax_main.grid(True, alpha=0.4, linestyle='--')
+        self.ax_main.tick_params(labelsize=9)
+        self.ax_main.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+        
+        self.lines = {}
+        self.canvases = {}
+        
+        for pot_name, pot_info in self.pot_data.items():
+            line, = self.ax_main.plot([], [], color=pot_info['color'], linewidth=2.5, label=pot_name.replace('Pot', 'S'))
             self.lines[pot_name] = line
-            self.canvases[pot_name] = canvas
-            
-            table_frame = ttk.Frame(content_frame)
-            table_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(2, 5), pady=5)
-            
-            tree = ttk.Treeview(table_frame, columns=('time', 'val'), show='headings', height=6)
-            tree.heading('time', text='T(s)')
-            tree.heading('val', text='Valor')
-            tree.column('time', width=50, anchor='center')
-            tree.column('val', width=60, anchor='center')
-            tree.tag_configure('odd', background='#f1f2f6')
-            tree.tag_configure('even', background='#ffffff')
-            tree.pack(fill=tk.BOTH, expand=True)
-            self.recent_tables[pot_name] = tree
-            
-            min_max_text = ax.text(0.02, 0.98, '', transform=ax.transAxes, fontsize=9,
-                                   verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.5))
-            self.min_max_texts[pot_name] = min_max_text
-
-        # Terminal Serial en la pantalla principal (al lado del Sensor 5)
-        term_container = ttk.LabelFrame(graph_frame, text="Terminal Serial", padding="5")
-        term_container.grid(row=2, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
         
-        term_frame = ttk.Frame(term_container)
-        term_frame.pack(fill=tk.BOTH, expand=True)
+        self.ax_main.legend(loc='upper left', fontsize=9)
         
-        self.main_terminal_text = tk.Text(term_frame, wrap=tk.WORD, font=("Courier New", 9), bg="#2c3e50", fg="#ecf0f1", insertbackground="white", height=5)
-        self.main_terminal_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.canvas_main = FigureCanvasTkAgg(fig, master=canvas_frame)
+        self.canvas_main.draw()
+        self.canvas_main.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        term_scroll = ttk.Scrollbar(term_frame, command=self.main_terminal_text.yview)
-        term_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.main_terminal_text.config(yscrollcommand=term_scroll.set)
-        
-        input_frame = ttk.Frame(term_container)
-        input_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        self.term_entry = ttk.Entry(input_frame, font=('Arial', 9))
-        self.term_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        self.term_entry.bind('<Return>', self.send_terminal_command)
-        
-        ttk.Button(input_frame, text="Enviar", style='Small.TButton', command=self.send_terminal_command).pack(side=tk.RIGHT)
-        ttk.Button(input_frame, text="Enter", style='Small.TButton', command=self.send_enter_main).pack(side=tk.RIGHT, padx=2)
+        self.min_max_text = self.ax_main.text(0.98, 0.97, '', transform=self.ax_main.transAxes, fontsize=9,
+                                   verticalalignment='top', horizontalalignment='right',
+                                   bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.7))
 
     def send_calibration_command(self, cmd):
         if self.send_command(cmd + '\n'):
@@ -413,10 +452,10 @@ class ArduinoMonitor:
         
         if is_enabled:
             self.send_command(f'E{pot_index}\n')
-            self.send_command(f'LON{pot_index}\n')
+            self.send_command(f'LON{potIndex}\n')
         else:
-            self.send_command(f'D{pot_index}\n')
-            self.send_command(f'LOFF{pot_index}\n')
+            self.send_command(f'D{potIndex}\n')
+            self.send_command(f'LOFF{potIndex}\n')
 
     def toggle_recording(self):
         self.is_recording_session = not self.is_recording_session
@@ -535,67 +574,56 @@ class ArduinoMonitor:
         if not self.is_reading:
             return
         
+        ax = self.ax_main
+        
+        all_y_data = []
+        all_x_data = []
+        
         for pot_name, pot_info in self.pot_data.items():
-            ax = self.axes[pot_name]
             line = self.lines[pot_name]
-            canvas = self.canvases[pot_name]
-            min_max_text = self.min_max_texts[pot_name]
             
             if pot_info['enabled'] and pot_info['values']:
                 x_data = list(pot_info['times'])
                 y_data = list(pot_info['values'])
+                
                 line.set_data(x_data, y_data)
-                
-                if x_data:
-                    ax.set_xlim(0, max(10, x_data[-1] * 1.05))
-                
-                if y_data:
-                    y_min, y_max = min(y_data), max(y_data)
-                    margin = (y_max - y_min) * 0.1
-                    if margin == 0: margin = 5.0
-                    ax.set_ylim(y_min - margin, y_max + margin)
-                
                 line.set_visible(True)
-                ax.set_facecolor('white')
-
-                min_val = pot_info['min_session']
-                max_val = pot_info['max_session']
-                if min_val is not None and max_val is not None:
-                    min_max_text.set_text(f'Min: {min_val:.4f}\nMax: {max_val:.4f}')
-                else:
-                    min_max_text.set_text('')
-                min_max_text.set_visible(True)
                 
-                tree = self.recent_tables[pot_name]
-                for item in tree.get_children():
-                    tree.delete(item)
-                
-                if self.is_recording_session:
-                    times = pot_info['times']
-                    values = pot_info['values']
-                    if times:
-                        last_t = times[-1]
-                        idx = len(times) - 1
-                        row_count = 0
-                        while idx >= 0:
-                            t = times[idx]
-                            if last_t - t > 1.0:
-                                break
-                            tag = 'even' if row_count % 2 == 0 else 'odd'
-                            tree.insert('', 'end', values=(f"{t:.2f}", f"{values[idx]:.4f}"), tags=(tag,))
-                            idx -= 1
-                            row_count += 1
+                all_y_data.extend(y_data)
+                all_x_data.extend(x_data)
             else:
                 line.set_data([], [])
                 line.set_visible(False)
-                ax.set_facecolor('#f5f5f5')
-                min_max_text.set_visible(False)
-                
-                tree = self.recent_tables[pot_name]
-                for item in tree.get_children():
-                    tree.delete(item)
-            
-            canvas.draw()
+        
+        # Actualizar límites de los ejes
+        if all_x_data:
+            ax.set_xlim(0, max(10, max(all_x_data) * 1.05))
+        
+        if all_y_data:
+            y_min, y_max = min(all_y_data), max(all_y_data)
+            margin = (y_max - y_min) * 0.1
+            if margin == 0:
+                margin = 5.0
+            ax.set_ylim(y_min - margin, y_max + margin)
+        
+        # Actualizar min/max de la sesión
+        min_session = None
+        max_session = None
+        for pot_info in self.pot_data.values():
+            if pot_info['enabled'] and pot_info['min_session'] is not None:
+                if min_session is None or pot_info['min_session'] < min_session:
+                    min_session = pot_info['min_session']
+            if pot_info['enabled'] and pot_info['max_session'] is not None:
+                if max_session is None or pot_info['max_session'] > max_session:
+                    max_session = pot_info['max_session']
+        
+        if min_session is not None and max_session is not None:
+            self.min_max_text.set_text(f'Sesión - Min: {min_session:.4f} | Max: {max_session:.4f}')
+        else:
+            self.min_max_text.set_text('')
+        
+        ax.set_facecolor('white')
+        self.canvas_main.draw()
         
         self.root.after(30, self.update_plot)
     
@@ -727,32 +755,33 @@ class ArduinoMonitor:
             
             temp_images = []
             
-            elements.append(Paragraph("Gráficas Individuales", styles['Heading2']))
+            elements.append(Paragraph("Gráfica General", styles['Heading2']))
             elements.append(Spacer(1, 15))
+            
+            # Gráfica general con todas las líneas activas
+            fig_general = Figure(figsize=(12, 5))
+            ax_general = fig_general.add_subplot(111)
+            ax_general.set_xlabel('Tiempo (s)', fontsize=10)
+            ax_general.set_ylabel('Valor (mm)', fontsize=10)
+            ax_general.set_title("Monitoreo en Tiempo Real - Todas las Sensor", fontsize=12, fontweight='bold')
+            ax_general.grid(True, alpha=0.4, linestyle='--')
+            ax_general.tick_params(labelsize=9)
+            ax_general.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
             
             for pot_name, pot_info in self.pot_data.items():
                 if pot_info['enabled'] and pot_info['values']:
-                    fig_individual = Figure(figsize=(7, 3.5))
-                    ax_individual = fig_individual.add_subplot(111)
-                    
                     x_data = list(pot_info['times'])
                     y_data = list(pot_info['values'])
-                    
-                    ax_individual.plot(x_data, y_data, color=pot_info['color'], linewidth=2, label=pot_name.replace('Pot', 'Sensor '))
-                    ax_individual.set_xlabel('Tiempo (s)', fontsize=10)
-                    ax_individual.set_ylabel('Valor', fontsize=10)
-                    ax_individual.set_title(f"{pot_name.replace('Pot', 'Sensor ')}", fontsize=12, fontweight='bold', color=pot_info['color'])
-                    ax_individual.grid(True, alpha=0.4, linestyle='--')
-                    ax_individual.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
-                    
-                    temp_img = f"temp_{pot_name}_{int(time.time())}.png"
-                    fig_individual.savefig(temp_img, dpi=150, bbox_inches='tight')
-                    temp_images.append(temp_img)
-                    
-                    elements.append(Image(temp_img, width=460, height=230))
-                    elements.append(Spacer(1, 15))
-                    
-                    plt.close(fig_individual)
+                    ax_general.plot(x_data, y_data, color=pot_info['color'], linewidth=2.5, label=pot_name.replace('Pot', 'S'))
+            
+            ax_general.legend(loc='upper left', fontsize=9)
+            
+            temp_img_general = f"temp_general_{int(time.time())}.png"
+            fig_general.savefig(temp_img_general, dpi=150, bbox_inches='tight')
+            temp_images.append(temp_img_general)
+            
+            elements.append(Image(temp_img_general, width=460, height=230))
+            elements.append(Spacer(1, 15))
             
             doc.build(elements)
             

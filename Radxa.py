@@ -17,13 +17,24 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
 import os
+import platform
+from pathlib import Path
 
 class ArduinoMonitor:
     def __init__(self, root):
         self.root = root
         self.root.title("Monitor de Transductores Arduino")
         self.root.geometry("1400x850")
-        self.root.state('zoomed')
+        
+        # Maximizar ventana de forma multiplataforma
+        if platform.system() == 'Windows':
+            self.root.state('zoomed')
+        else:
+            # Linux y macOS
+            self.root.attributes('-zoomed', True) if platform.system() == 'Darwin' else None
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.root.geometry(f"{screen_width}x{screen_height}")
         
         self.serial_conn = None
         self.is_reading = False
@@ -57,9 +68,23 @@ class ArduinoMonitor:
         main_frame.rowconfigure(1, weight=1)
         
         style = ttk.Style()
-        style.theme_use('clam')
+        # Usar tema disponible en todas las plataformas
+        available_themes = style.theme_names()
+        if 'clam' in available_themes:
+            style.theme_use('clam')
+        elif 'alt' in available_themes:
+            style.theme_use('alt')
+        else:
+            style.theme_use(available_themes[0] if available_themes else 'default')
         
-        style.configure('TButton', font=('Arial', 11, 'bold'), padding=8, borderwidth=0)
+        # Fuente compatible con múltiples plataformas
+        button_font = ('TkDefaultFont', 11, 'bold') if platform.system() == 'Linux' else ('Arial', 11, 'bold')
+        small_font = ('TkDefaultFont', 9, 'bold') if platform.system() == 'Linux' else ('Arial', 9, 'bold')
+        label_font = ('TkDefaultFont', 9) if platform.system() == 'Linux' else ('Arial', 9)
+        large_font = ('TkDefaultFont', 13, 'bold') if platform.system() == 'Linux' else ('Arial', 13, 'bold')
+        mono_font = ('DejaVu Sans Mono', 10) if platform.system() == 'Linux' else ('Courier New', 10)
+        
+        style.configure('TButton', font=button_font, padding=8, borderwidth=0)
         style.map('TButton',
                   relief=[('pressed', 'sunken'), ('!pressed', 'raised')])
 
@@ -81,11 +106,11 @@ class ArduinoMonitor:
         style.configure('Record.TButton', background='#2ecc71', foreground='white')
         style.map('Record.TButton', background=[('active', '#27ae60')])
 
-        style.configure('Small.TButton', font=('Arial', 9, 'bold'), padding=(8, 4), foreground='black', background='#ecf0f1')
+        style.configure('Small.TButton', font=small_font, padding=(8, 4), foreground='black', background='#ecf0f1')
         style.map('Small.TButton', background=[('active', '#bdc3c7')])
         
-        style.configure("Treeview", font=('Arial', 9), rowheight=22, background="#ffffff", fieldbackground="#ffffff")
-        style.configure("Treeview.Heading", font=('Arial', 9, 'bold'), background="#dfe6e9", foreground="#2d3436")
+        style.configure("Treeview", font=label_font, rowheight=22, background="#ffffff", fieldbackground="#ffffff")
+        style.configure("Treeview.Heading", font=small_font, background="#dfe6e9", foreground="#2d3436")
         style.map("Treeview", background=[('selected', '#3498db')], foreground=[('selected', 'white')])
 
         # Crear estilos dinámicos para cada sensor
@@ -98,9 +123,9 @@ class ArduinoMonitor:
         }
         
         for pot_name, color in pot_colors.items():
-            style.configure(f'{pot_name}.TCheckbutton', background=color, foreground='white', font=('Arial', 9, 'bold'))
+            style.configure(f'{pot_name}.TCheckbutton', background=color, foreground='white', font=small_font)
             style.map(f'{pot_name}.TCheckbutton', background=[('active', color)])
-            style.configure(f'{pot_name}.TLabel', background=color, foreground='white', font=('Arial', 9))
+            style.configure(f'{pot_name}.TLabel', background=color, foreground='white', font=label_font)
 
         control_frame = ttk.LabelFrame(main_frame, text="Control de Conexión", padding="10")
         control_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5), padx=5)
@@ -119,7 +144,7 @@ class ArduinoMonitor:
         
         
         ttk.Label(control_frame, text="Puerto:").grid(row=0, column=0, padx=3, sticky=tk.W)
-        self.port_combo = ttk.Combobox(control_frame, width=10, state='readonly', font=('Arial', 9))
+        self.port_combo = ttk.Combobox(control_frame, width=10, state='readonly', font=label_font)
         self.port_combo.grid(row=0, column=1, padx=3, sticky=(tk.W, tk.E))
         
         ttk.Button(control_frame, text="Actualizar", command=self.update_ports, style='Action.TButton').grid(row=0, column=2, padx=3)
@@ -192,7 +217,7 @@ class ArduinoMonitor:
             
             # Label de valor prominente
             label = tk.Label(inner_frame, text="---", 
-                            foreground='white', bg=pot_info['color'], font=('Arial', 13, 'bold'), padx=6, pady=4)
+                            foreground='white', bg=pot_info['color'], font=large_font, padx=6, pady=4)
             label.grid(row=0, column=1, columnspan=1, padx=3, pady=6, sticky=(tk.W, tk.E))
             self.pot_labels[pot_name] = label
             
@@ -203,7 +228,7 @@ class ArduinoMonitor:
             self.tare_buttons[pot_name] = tare_btn
 
             # Entrada de rango
-            range_entry = ttk.Entry(inner_frame, width=8, font=('Arial', 9))
+            range_entry = ttk.Entry(inner_frame, width=8, font=label_font)
             range_entry.insert(0, "25.0")
             self.range_entries[pot_name] = range_entry
 
@@ -344,7 +369,8 @@ class ArduinoMonitor:
         term_frame = ttk.Frame(main_frame)
         term_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        self.terminal_text = tk.Text(term_frame, wrap=tk.WORD, height=15, font=("Courier New", 10), bg="#2c3e50", fg="#ecf0f1", insertbackground="white")
+        mono_font = ('DejaVu Sans Mono', 10) if platform.system() == 'Linux' else ('Courier New', 10)
+        self.terminal_text = tk.Text(term_frame, wrap=tk.WORD, height=15, font=mono_font, bg="#2c3e50", fg="#ecf0f1", insertbackground="white")
         self.terminal_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         scrollbar = ttk.Scrollbar(term_frame, command=self.terminal_text.yview)
@@ -644,17 +670,21 @@ class ArduinoMonitor:
 
     
     def export_csv(self):
+        # Usar pathlib para compatibilidad multiplataforma
+        default_name = f"datos_transductores_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"datos_transductores_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            initialfile=default_name
         )
         
         if not filename:
             return
         
         try:
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+            # Convertir a Path para compatibilidad
+            file_path = Path(filename)
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 
                 headers = ['Tiempo (s)']
@@ -689,17 +719,20 @@ class ArduinoMonitor:
             messagebox.showerror("Error", f"No se pudo exportar: {str(e)}")
     
     def generate_pdf_report(self):
+        # Usar pathlib para compatibilidad multiplataforma
+        default_name = f"reporte_transductores_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         filename = filedialog.asksaveasfilename(
             defaultextension=".pdf",
             filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-            initialfile=f"reporte_transductores_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            initialfile=default_name
         )
         
         if not filename:
             return
         
         try:
-            doc = SimpleDocTemplate(filename, pagesize=letter)
+            file_path = Path(filename)
+            doc = SimpleDocTemplate(str(file_path), pagesize=letter)
             elements = []
             styles = getSampleStyleSheet()
             
@@ -776,20 +809,19 @@ class ArduinoMonitor:
             
             ax_general.legend(loc='upper left', fontsize=9)
             
-            temp_img_general = f"temp_general_{int(time.time())}.png"
-            fig_general.savefig(temp_img_general, dpi=150, bbox_inches='tight')
-            temp_images.append(temp_img_general)
+            # Usar tempfile para compatibilidad
+            import tempfile
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_img_general = str(Path(temp_dir) / f"temp_general_{int(time.time())}.png")
+                fig_general.savefig(temp_img_general, dpi=150, bbox_inches='tight')
+                temp_images.append(temp_img_general)
+                
+                elements.append(Image(temp_img_general, width=460, height=230))
+                elements.append(Spacer(1, 15))
+                
+                doc.build(elements)
             
-            elements.append(Image(temp_img_general, width=460, height=230))
-            elements.append(Spacer(1, 15))
-            
-            doc.build(elements)
-            
-            for temp_img in temp_images:
-                if os.path.exists(temp_img):
-                    os.remove(temp_img)
-            
-            messagebox.showinfo("Reporte Generado", f"Reporte PDF generado exitosamente:\n{filename}\n\nIncluye gráficas de {len(enabled_list)} transductores seleccionados.")
+            messagebox.showinfo("Reporte Generado", f"Reporte PDF generado exitosamente:\n{filename}\n\nIncluye gráficas de {len([p for p in self.pot_data if self.pot_data[p]['enabled']])} transductores seleccionados.")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo generar el reporte: {str(e)}")
 
